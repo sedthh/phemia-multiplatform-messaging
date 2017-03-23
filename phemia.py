@@ -15,6 +15,7 @@ import collections
 class Messaging:
 
 	allowed_platforms	= ('facebook','raw')
+	allowed_attachments	= ('image','audio','video','file')
 	
 	##### CONSTRUCTOR #####
 	def __init__(self,options={}):
@@ -209,13 +210,42 @@ class Messaging:
 			# text
 			if 'text' in message:
 				response['message']['text']			= message['text']
+			# attachment
+			if 'attachment' in message:
+				# send one file / image
+				if len(message['attachment'])==1 and message['attachment'][0]['url']:
+					if 'type' not in message['attachment'][0] or message['attachment'][0]['type'] not in allowed_attachments:
+						message['attachment'][0]['type']	= get_attachment_type(message['attachment'][0]['url'])
+					if 'reusable' not in message['attachment'][0]:
+						message['attachment'][0]['reusable']= False
+					
+					if 'text' in message and message['text']:
+						if 'title' not in message['attachment'][0]:
+							message['attachment'][0]['title']= message['text'][:80]
+						elif 'description' not in message['attachment'][0]:
+							message['attachment'][0]['description']= message['text'][:80]
+						## DELETE
+						del response['message']['text']	# facebook won't send attachments with text
+				
+					# send one file / image as a simple attachment without text				
+					if ('title' not in message['attachment'][0] or not message['attachment'][0]['title']) and ('description' not in message['attachment'][0] or not message['attachment'][0]['description']):
+						response['message']['attachment']	= {
+							"type"		: message['attachment'][0]['type'],
+							"payload"	: {
+								"url"		: message['attachment'][0]['url'],
+								"is_reusable":message['attachment'][0]['reusable']
+							}
+						}
+			
+			# other
 			if 'other' in message:
 				# sender action such as typing_on, typing_off, mark_seen			
 				if 'action' in message['other']:
-					response['message']					= None
+					## DELETE
+					response['message']					= {}	# facebook won't send sender_action with text/attachments
 					response['sender_action']			= message['other']['action']
 				# documented on facebook but does not work
-				if 'notification' in message:
+				if 'notification' in message['other']:
 					response['notification_type']		= message['other']['notification']
 			
 			data_json	= {}
@@ -363,13 +393,38 @@ class Messaging:
 				"raw"		: data_json,
 				"error"		: error
 			}
+	
+	### send multiple messages if all data can not be sent at once
+	def smart_send(self,message={}):
+		if self.is_platform('facebook'):
+			returned_values	= []
+			message_copies	= [message.copy()]
+			# sender_action with text or attachment
+			if 'other' in message_copies[0] and 'sender_action' in message_copies[0]['other']:
+				if ('text' in message_copies[0] and message_copies[0]['text']) or ('attachment' in message_copies[0] and message_copies[0]['attachment']):
+					message_copies.append(message.copy())
+					if 'text' in message_copies[0]:
+						del message_copies[0]['text']
+					if 'attachment' in message_copies[0]:
+						del message_copies[0]['attachment']
+					del message_copies[1]['other']['sender_action']
 			
-			
+			for smart_message in message_copies:
+				returned_values.append(self.send(smart_message))
+			return returned_values
+		else: 
+			return [self.send(message)]
+					
 	### send reply (send message to last sender)
 	def reply(self,message={}):
 		if 'recipient' not in message:
 			message['recipient']	= self.last_sender
 		return self.send(message)
+	
+	def smart_reply(self,message={}):
+		if 'recipient' not in message:
+			message['recipient']	= self.last_sender
+		return self.smart_send(message)
 	
 	
 def deep_dict_merge(d, u):
@@ -381,6 +436,17 @@ def deep_dict_merge(d, u):
 		else:
 			d[k] = u[k]
 	return d
+
+def get_attachment_type(file):
+	if file:
+		extension	= file.lower().split(".")[-1]
+		if extension in ('jpg','jpeg','gif','png','bmp','tiff'):
+			return 'image'
+		elif extension in ('wav','ogg','mp3','wma','aiff','3gp'):
+			return 'audio'
+		elif extension in ('webm','flv','ogv','gifv','avi','mov','qt','wmv','mpg','mpeg','mp4'):
+			return 'video'
+	return 'file'
 
 '''
 	Message JSON model:
