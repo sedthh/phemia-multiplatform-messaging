@@ -17,6 +17,7 @@ class Messaging:
 	ALLOWED_ATTACHMENTS	= ('image','audio','video','file')
 	ALLOWED_TITLE_LENGTH= 80
 	ALLOWED_SUBTITLE_LENGTH=80
+	DEFAULT_BUTTON		= 'UNDEFINED'
 	
 	##### CONSTRUCTOR #####
 	def __init__(self,options={}):
@@ -210,9 +211,9 @@ class Messaging:
 				response['message']['text']			= message['text']
 			# attachment
 			if 'attachment' in message:
-				# send one file / image
-				if len(message['attachment'])==1 and message['attachment'][0]['url']:
-					if 'type' not in message['attachment'][0] or message['attachment'][0]['type'] not in ALLOWED_ATTACHMENTS:
+				# send ONE file / image
+				if len(message['attachment'])==1 and 'url' in message['attachment'][0] and message['attachment'][0]['url']:
+					if 'type' not in message['attachment'][0] or message['attachment'][0]['type'] not in self.ALLOWED_ATTACHMENTS:
 						message['attachment'][0]['type']	= get_attachment_type(message['attachment'][0]['url'])
 					if 'reusable' not in message['attachment'][0]:
 						message['attachment'][0]['reusable']= False
@@ -221,12 +222,12 @@ class Messaging:
 						if 'title' not in message['attachment'][0]:
 							message['attachment'][0]['title']= message['text'][:self.ALLOWED_TITLE_LENGTH]
 						elif 'description' not in message['attachment'][0]:
-							message['attachment'][0]['subtitle']= message['text'][:self.ALLOWED_SUBTITLE_LENGTH]
+							message['attachment'][0]['description']= message['text'][:self.ALLOWED_SUBTITLE_LENGTH]
 						## DELETE
 						response['message'].pop('text')	# facebook won't send attachments with text
 				
-					# send one file / image as a simple attachment without text				
-					if (('title' not in message['attachment'][0] or not message['attachment'][0]['title']) and ('description' not in message['attachment'][0] or not message['attachment'][0]['description'])) or message['attachment'][0]['type'] != 'image':
+					# send ONE file / image as a simple attachment WITHOUT text	or buttons		
+					if (('title' not in message['attachment'][0] or not message['attachment'][0]['title']) and ('description' not in message['attachment'][0] or not message['attachment'][0]['description']) and ('buttons' not in message['attachment'][0] or not message['attachment'][0]['buttons'])) or message['attachment'][0]['type'] != 'image':
 						response['message']['attachment']	= {
 							"type"		: message['attachment'][0]['type'],
 							"payload"	: {
@@ -234,11 +235,12 @@ class Messaging:
 								"is_reusable":message['attachment'][0]['reusable']
 							}
 						}
-					if message['attachment'][0]['type'] == 'image':
+					# send ONE image WITH text and/or buttons	
+					elif message['attachment'][0]['type'] == 'image':
 						if 'title' not in message['attachment'][0]:
 							message['attachment'][0]['title']	= message['attachment'][0]['url']
 						if 'description' not in message['attachment'][0]:
-							message['attachment'][0]['subtitle']= ""
+							message['attachment'][0]['description']= ""
 						if 'buttons' in message['attachment'][0]:
 							buttons								= self._generate_facebook_buttons(message['attachment'][0]['buttons'])
 						else:
@@ -252,7 +254,7 @@ class Messaging:
 								   {
 									"title"			: message['attachment'][0]['title'],
 									"image_url"		: message['attachment'][0]['url'],
-									"subtitle"		: message['attachment'][0]['subtitle'],
+									"subtitle"		: message['attachment'][0]['description'],
 									"default_action": {
 									  "type"			: "web_url",
 									  "url"				: message['attachment'][0]['url'],
@@ -265,7 +267,11 @@ class Messaging:
 								]
 							}
 						}
-						
+				# send text with buttons
+				elif len(message['attachment'])==1 and ('url' not in message['attachment'][0] or not message['attachment'][0]['url']) and ('type' not in message['attachment'][0] or message['attachment'][0]['type']=='none'):
+					if 'buttons' in message['attachment'][0]:
+						response['message']['quick_replies']= self._generate_facebook_buttons(message['attachment'][0]['buttons'], True)					
+				
 			# other
 			if 'other' in message:
 				# sender action such as typing_on, typing_off, mark_seen			
@@ -439,22 +445,29 @@ class Messaging:
 						tmp['content_type']	= 'text'
 						if 'text' in button:
 							tmp['title']		= button['text']
-						if 'url' in button:
-							tmp['payload']		= button['url']
+						else:
+							tmp['title']		= self.DEFAULT_BUTTON
+						if 'value' in button:
+							tmp['payload']		= tmp['title']
+						else:
+							tmp['payload']		= tmp['title']
 						if 'image' in button:
 							tmp['image_url']	= button['image']
 				else:
-					if 'type' in button and button['type'] == 'url':
-						tmp['type']			= 'web_url'
-						if 'url' in button:
-							tmp['url']			= button['url']
-							tmp['fallback_url']	= button['url']
-					else:
-						tmp['type']			= 'postback'
-						if 'url' in button:
-							tmp['payload']		= button['url']
 					if 'text' in button:
 						tmp['title']		= button['text']
+					else:
+						tmp['title']		= self.DEFAULT_BUTTON
+					if 'type' in button and button['type'] == 'url' and 'value' in button:
+						tmp['type']			= 'web_url'
+						tmp['url']			= button['value']
+						tmp['fallback_url']	= button['value']
+					else:
+						tmp['type']			= 'postback'
+						if 'value' in button:
+							tmp['payload']		= button['value']
+						else:
+							tmp['payload']		= tmp['title']
 					tmp['messenger_extensions']= True
 					#TODO: webview_height_ratio
 					
