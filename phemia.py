@@ -5,7 +5,6 @@ __version_info__	= tuple(int(num) for num in __version__.split('.'))
 
 import os
 import sys
-import io
 import json
 import requests
 import urllib
@@ -14,8 +13,10 @@ import collections
 # Phemia - Python Messenger AI
 class Messaging:
 
-	allowed_platforms	= ('facebook','raw')
-	allowed_attachments	= ('image','audio','video','file')
+	ALLOWED_PLATFORMS	= ('facebook','raw')
+	ALLOWED_ATTACHMENTS	= ('image','audio','video','file')
+	ALLOWED_TITLE_LENGTH= 80
+	ALLOWED_SUBTITLE_LENGTH=80
 	
 	##### CONSTRUCTOR #####
 	def __init__(self,options={}):
@@ -44,7 +45,7 @@ class Messaging:
 		self.last_recipient	= {}
 		
 		# Automatically register to webhook on INIT
-		if self.settings['platform'] not in self.allowed_platforms:
+		if self.settings['platform'] not in self.ALLOWED_PLATFORMS:
 			raise ValueError('Platform "%s" is not supported.' % (self.settings['platform']))
 		elif self.settings['platform'] == 'facebook':
 			if self.get_value('verify_token') is not None and self.get_value('access_token') is not None:
@@ -59,7 +60,7 @@ class Messaging:
 		return False
 		
 	def set_platform(self,new_platform):
-		if new_platform and new_platform in self.allowed_platforms:
+		if new_platform and new_platform in self.ALLOWED_PLATFORMS:
 			self.settings['platform']	= new_platform
 		else:
 			raise ValueError('Platform "%s" is not supported.' % (new_platform))
@@ -82,12 +83,9 @@ class Messaging:
 	
 	### read HTTP POST JSON vars based on environment
 	def _http_request_post(self):
-		if self.settings['platform'] == 'facebook':
-			#NOTE: can only be read once
-			return json.load(sys.stdin, encoding='utf-8')
-		elif self.settings['platform'] == 'raw':
-			return json.loads(io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8').read())
-		return {}	
+		#NOTE: can only be read once
+		return json.load(sys.stdin, encoding='utf-8')
+		#return json.loads(io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8').read())
 	
 	### convert received message to a simple dict
 	def receive(self):
@@ -214,21 +212,21 @@ class Messaging:
 			if 'attachment' in message:
 				# send one file / image
 				if len(message['attachment'])==1 and message['attachment'][0]['url']:
-					if 'type' not in message['attachment'][0] or message['attachment'][0]['type'] not in allowed_attachments:
+					if 'type' not in message['attachment'][0] or message['attachment'][0]['type'] not in ALLOWED_ATTACHMENTS:
 						message['attachment'][0]['type']	= get_attachment_type(message['attachment'][0]['url'])
 					if 'reusable' not in message['attachment'][0]:
 						message['attachment'][0]['reusable']= False
 					
 					if 'text' in message and message['text']:
 						if 'title' not in message['attachment'][0]:
-							message['attachment'][0]['title']= message['text'][:80]
+							message['attachment'][0]['title']= message['text'][:self.ALLOWED_TITLE_LENGTH]
 						elif 'description' not in message['attachment'][0]:
-							message['attachment'][0]['description']= message['text'][:80]
+							message['attachment'][0]['subtitle']= message['text'][:self.ALLOWED_SUBTITLE_LENGTH]
 						## DELETE
-						del response['message']['text']	# facebook won't send attachments with text
+						response['message'].pop('text')	# facebook won't send attachments with text
 				
 					# send one file / image as a simple attachment without text				
-					if ('title' not in message['attachment'][0] or not message['attachment'][0]['title']) and ('description' not in message['attachment'][0] or not message['attachment'][0]['description']):
+					if (('title' not in message['attachment'][0] or not message['attachment'][0]['title']) and ('description' not in message['attachment'][0] or not message['attachment'][0]['description'])) or message['attachment'][0]['type'] != 'image':
 						response['message']['attachment']	= {
 							"type"		: message['attachment'][0]['type'],
 							"payload"	: {
@@ -236,14 +234,44 @@ class Messaging:
 								"is_reusable":message['attachment'][0]['reusable']
 							}
 						}
-			
+					if message['attachment'][0]['type'] == 'image':
+						if 'title' not in message['attachment'][0]:
+							message['attachment'][0]['title']	= message['attachment'][0]['url']
+						if 'description' not in message['attachment'][0]:
+							message['attachment'][0]['subtitle']= ""
+						if 'buttons' in message['attachment'][0]:
+							buttons								= self._generate_facebook_buttons(message['attachment'][0]['buttons'])
+						else:
+							buttons								= None
+						
+						response['message']['attachment']	= {
+							"type"		: "template",
+							"payload"	:{
+								"template_type"	:"generic",
+								"elements"		:[
+								   {
+									"title"			: message['attachment'][0]['title'],
+									"image_url"		: message['attachment'][0]['url'],
+									"subtitle"		: message['attachment'][0]['subtitle'],
+									"default_action": {
+									  "type"			: "web_url",
+									  "url"				: message['attachment'][0]['url'],
+									  "messenger_extensions": True,
+									  "webview_height_ratio": "full",	# compact|tall|full
+									  "fallback_url"	: message['attachment'][0]['url']
+									},
+									"buttons"	: buttons     
+								  }
+								]
+							}
+						}
+						
 			# other
 			if 'other' in message:
 				# sender action such as typing_on, typing_off, mark_seen			
 				if 'action' in message['other']:
-					## DELETE
-					response['message']					= {}	# facebook won't send sender_action with text/attachments
-					response['sender_action']			= message['other']['action']
+					if not response['message']:	# facebook won't send actions with attachments or text
+						response['sender_action']			= message['other']['action']
 				# documented on facebook but does not work
 				if 'notification' in message['other']:
 					response['notification_type']		= message['other']['notification']
@@ -393,40 +421,71 @@ class Messaging:
 				"raw"		: data_json,
 				"error"		: error
 			}
-	
-	### send multiple messages if all data can not be sent at once
-	def smart_send(self,message={}):
-		if self.is_platform('facebook'):
-			returned_values	= []
-			message_copies	= [message.copy()]
-			# sender_action with text or attachment
-			if 'other' in message_copies[0] and 'sender_action' in message_copies[0]['other']:
-				if ('text' in message_copies[0] and message_copies[0]['text']) or ('attachment' in message_copies[0] and message_copies[0]['attachment']):
-					message_copies.append(message.copy())
-					if 'text' in message_copies[0]:
-						del message_copies[0]['text']
-					if 'attachment' in message_copies[0]:
-						del message_copies[0]['attachment']
-					del message_copies[1]['other']['sender_action']
 			
-			for smart_message in message_copies:
-				returned_values.append(self.send(smart_message))
-			return returned_values
-		else: 
-			return [self.send(message)]
+	def _generate_fallback_url(self,url):
+		if url:
+			return "{0.scheme}://{0.netloc}/".format(urllib.parse.urlsplit(url))
+		return ''
+		
+	def _generate_facebook_buttons(self,buttons,quick_reply=False):
+		if buttons:
+			facebook_buttons	= []
+			for button in buttons:
+				tmp					= {}
+				if quick_reply:
+					if 'type' in button and button['type'] == 'location':
+						tmp['content_type']	= 'location'
+					else:
+						tmp['content_type']	= 'text'
+						if 'text' in button:
+							tmp['title']		= button['text']
+						if 'url' in button:
+							tmp['payload']		= button['url']
+						if 'image' in button:
+							tmp['image_url']	= button['image']
+				else:
+					if 'type' in button and button['type'] == 'url':
+						tmp['type']			= 'web_url'
+						if 'url' in button:
+							tmp['url']			= button['url']
+							tmp['fallback_url']	= button['url']
+					else:
+						tmp['type']			= 'postback'
+						if 'url' in button:
+							tmp['payload']		= button['url']
+					if 'text' in button:
+						tmp['title']		= button['text']
+					tmp['messenger_extensions']= True
+					#TODO: webview_height_ratio
 					
+				facebook_buttons.append(tmp)
+			return facebook_buttons
+		return []
+	
 	### send reply (send message to last sender)
 	def reply(self,message={}):
 		if 'recipient' not in message:
 			message['recipient']	= self.last_sender
 		return self.send(message)
 	
-	def smart_reply(self,message={}):
-		if 'recipient' not in message:
-			message['recipient']	= self.last_sender
-		return self.smart_send(message)
-	
-	
+	def whitelist(self,action="get",domains=[]):
+		if action=="get":
+			data	= requests.get("https://graph.facebook.com/v2.6/me/thread_settings?fields=whitelisted_domains&access_token=" + self.get_value('access_token'), headers={'Content-type': 'application/json', 'Accept': 'text/plain'}, timeout=self.get_value('timeout'))
+		elif action in ('add','remove'):
+			if not domains:
+				#domains	= ['https://'+os.environ.get('HTTP_HOST')+'/']
+				raise ValueError('No list of domains is given.')
+			curl	= {
+				"setting_type"		: "domain_whitelisting",
+				"whitelisted_domains": domains,
+				"domain_action_type": "add"
+			}
+			data	= requests.post("https://graph.facebook.com/v2.6/me/thread_settings?access_token=" + self.get_value('access_token'), headers={'Content-type': 'application/json', 'Accept': 'text/plain'}, data=json.dumps(curl), timeout=self.get_value('timeout'))
+		else:
+			raise ValueError('Only "get", "add" and "remove" are supported.')
+			return {}
+		return data.json()
+
 def deep_dict_merge(d, u):
 	''' VIA http://stackoverflow.com/questions/3232943/update-value-of-a-nested-dictionary-of-varying-depth '''
 	for k, v in u.items():
@@ -435,7 +494,7 @@ def deep_dict_merge(d, u):
 			d[k] = r
 		else:
 			d[k] = u[k]
-	return d
+	return d	
 
 def get_attachment_type(file):
 	if file:
