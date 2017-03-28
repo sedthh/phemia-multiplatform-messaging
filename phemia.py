@@ -9,6 +9,7 @@ import json
 import requests
 import urllib
 import collections
+import time
 
 # Phemia - Python Messenger AI
 class Messaging:
@@ -80,6 +81,7 @@ class Messaging:
 		
 	### read HTTP GET vars based on environment
 	def _http_request_get(self):
+		# TODO: implement for Python server apps
 		get 	= urllib.parse.parse_qs(os.getenv('QUERY_STRING'), encoding='utf-8')
 		data	= {}
 		for key, value in get.items():
@@ -88,13 +90,17 @@ class Messaging:
 	
 	### read HTTP POST JSON vars based on environment
 	def _http_request_post(self):
-		#NOTE: can only be read once
+		# NOTE: can only be read once
+		# TODO: implement for Python server apps
 		return json.load(sys.stdin, encoding='utf-8')
 		#return json.loads(io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8').read())
 	
 	### convert received message to a simple dict
 	def receive(self):
 		data		= self._http_request_post()
+		return self.translate(data)
+		
+	def translate(self,data):
 		sender		= {"id":None}
 		recipient	= {"id":None}
 		text		= None
@@ -538,7 +544,6 @@ class Session:
 	def __init__(self,options={}):
 		default_settings	= {
 			"platform"	: "raw",				# save session as text files by default
-			
 			"raw"		: {						# saving sessions as text files containing JSON objects
 				"path"				: '',		# server to send messages to (if given)
 				"extension"			: 'txt'		# file extension
@@ -560,7 +565,7 @@ class Session:
 	def get_value(self,variable):
 		return self.settings[self.settings['platform']][variable]
 			
-	def file_command(self,command,id,value=None):
+	def file_command(self,command,id,new_contents=None):
 		if self.get_value('extension'):
 			if self.get_value('extension')[0]=='.':
 				id	+= self.get_value('extension')
@@ -580,7 +585,7 @@ class Session:
 			else:
 				data	= open(file, 'w')
 				if command=='set':
-					data.write(json.dumps(value))
+					data.write(json.dumps(new_contents))
 					data.close()
 				elif command=='clear':
 					data.write('{}')
@@ -590,12 +595,12 @@ class Session:
 	def file_as_dict(self,id,key,value=None):
 		data	= self.file_command('get',id)
 		if value is not None:
+			data['last_update']= int(time.time())
 			data[key]	= value
 			new_data	= self.file_command('set',id,data)
 		if key in data:
 			return data[key]
 		return None
-
 	
 	def get(self,id,key):
 		if self.is_platform('raw'):
@@ -609,9 +614,28 @@ class Session:
 		if self.is_platform('raw'):
 			return self.file_command('clear',id)
 		
-	def remove(self,key):
+	def remove(self,id):
 		if self.is_platform('raw'):
 			return self.file_command('remove',id)
+	
+	def append(self,id,key,value=None,max_length=7):
+		if self.is_platform('raw'):
+			data	= self.file_command('get',id)
+			if max_length>0:
+				if value is not None:
+					data['last_update']= int(time.time())
+					if key in data and isinstance(data[key], list):
+						start		= len(data[key])-max_length+1
+						if start<0:
+								start	= 0
+						data[key]	= data[key][start:]
+					else:
+						data[key]	= []
+					data[key].append(value)
+					new_data	= self.file_command('set',id,data)
+			else:
+				raise ValueError('Array length must be more than 0')
+			return data
 	
 	def dict_path(self,data={},path=[]):
 		if data and path:
