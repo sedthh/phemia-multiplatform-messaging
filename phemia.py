@@ -15,9 +15,13 @@ class Messaging:
 
 	ALLOWED_PLATFORMS	= ('facebook','raw')
 	ALLOWED_ATTACHMENTS	= ('image','audio','video','file')
-	ALLOWED_TITLE_LENGTH= 80
-	ALLOWED_SUBTITLE_LENGTH=80
 	DEFAULT_BUTTON		= 'UNDEFINED'
+	
+	ALLOWED_FACEBOOK_TITLE_LENGTH	= 80
+	ALLOWED_FACEBOOK_SUBTITLE_LENGTH= 80
+	ALLOWED_FACEBOOK_BUTTONS_LENGTH	= 3
+	ALLOWED_FACEBOOK_MESSAGE_LENGTH	= 320
+	
 	
 	##### CONSTRUCTOR #####
 	def __init__(self,options={}):
@@ -208,7 +212,7 @@ class Messaging:
 			}
 			# text
 			if 'text' in message:
-				response['message']['text']			= message['text']
+				response['message']['text']			= message['text'][:self.ALLOWED_FACEBOOK_MESSAGE_LENGTH]
 			# attachment
 			if 'attachment' in message:
 				# send ONE file / image
@@ -220,9 +224,9 @@ class Messaging:
 					
 					if 'text' in message and message['text']:
 						if 'title' not in message['attachment'][0]:
-							message['attachment'][0]['title']= message['text'][:self.ALLOWED_TITLE_LENGTH]
+							message['attachment'][0]['title']= message['text'][:self.ALLOWED_FACEBOOK_TITLE_LENGTH]
 						elif 'description' not in message['attachment'][0]:
-							message['attachment'][0]['description']= message['text'][:self.ALLOWED_SUBTITLE_LENGTH]
+							message['attachment'][0]['description']= message['text'][:self.ALLOWED_FACEBOOK_SUBTITLE_LENGTH]
 						## DELETE
 						response['message'].pop('text')	# facebook won't send attachments with text
 				
@@ -242,7 +246,7 @@ class Messaging:
 						if 'description' not in message['attachment'][0]:
 							message['attachment'][0]['description']= ""
 						if 'buttons' in message['attachment'][0]:
-							buttons								= self._generate_facebook_buttons(message['attachment'][0]['buttons'])
+							buttons								= self._generate_facebook_buttons(message['attachment'][0]['buttons'])[:self.ALLOWED_FACEBOOK_BUTTONS_LENGTH]
 						else:
 							buttons								= None
 						
@@ -433,7 +437,7 @@ class Messaging:
 			return "{0.scheme}://{0.netloc}/".format(urllib.parse.urlsplit(url))
 		return ''
 		
-	def _generate_facebook_buttons(self,buttons,quick_reply=False):
+	def _generate_facebook_buttons(self,buttons,quick_reply=False,auto_fallback=True):
 		if buttons:
 			facebook_buttons	= []
 			for button in buttons:
@@ -461,7 +465,8 @@ class Messaging:
 					if 'type' in button and button['type'] == 'url' and 'value' in button:
 						tmp['type']			= 'web_url'
 						tmp['url']			= button['value']
-						tmp['fallback_url']	= button['value']
+						if auto_fallback:
+							tmp['fallback_url']	= button['value']
 					else:
 						tmp['type']			= 'postback'
 						if 'value' in button:
@@ -482,22 +487,47 @@ class Messaging:
 		return self.send(message)
 	
 	def whitelist(self,action="get",domains=[]):
-		if action=="get":
-			data	= requests.get("https://graph.facebook.com/v2.6/me/thread_settings?fields=whitelisted_domains&access_token=" + self.get_value('access_token'), headers={'Content-type': 'application/json', 'Accept': 'text/plain'}, timeout=self.get_value('timeout'))
-		elif action in ('add','remove'):
-			if not domains:
-				#domains	= ['https://'+os.environ.get('HTTP_HOST')+'/']
-				raise ValueError('No list of domains is given.')
-			curl	= {
-				"setting_type"		: "domain_whitelisting",
-				"whitelisted_domains": domains,
-				"domain_action_type": "add"
-			}
-			data	= requests.post("https://graph.facebook.com/v2.6/me/thread_settings?access_token=" + self.get_value('access_token'), headers={'Content-type': 'application/json', 'Accept': 'text/plain'}, data=json.dumps(curl), timeout=self.get_value('timeout'))
-		else:
-			raise ValueError('Only "get", "add" and "remove" are supported.')
-			return {}
-		return data.json()
+		if self.is_platform('facebook'):
+			if action=="get":
+				data	= requests.get("https://graph.facebook.com/v2.6/me/thread_settings?fields=whitelisted_domains&access_token=" + self.get_value('access_token'), headers={'Content-type': 'application/json', 'Accept': 'text/plain'}, timeout=self.get_value('timeout'))
+			elif action in ('add','remove'):
+				if not domains:
+					#domains	= ['https://'+os.environ.get('HTTP_HOST')+'/']
+					raise ValueError('No list of domains is given.')
+				curl	= {
+					"setting_type"		: "domain_whitelisting",
+					"whitelisted_domains": domains,
+					"domain_action_type": "add"
+				}
+				data	= requests.post("https://graph.facebook.com/v2.6/me/thread_settings?access_token=" + self.get_value('access_token'), headers={'Content-type': 'application/json', 'Accept': 'text/plain'}, data=json.dumps(curl), timeout=self.get_value('timeout'))
+			else:
+				raise ValueError('Only "get", "add" and "remove" are supported.')
+				return {}
+			return data.json()
+		return {}
+		
+	def menu(self,menu={}):
+		if self.is_platform('facebook'):
+			if menu:
+				if 'attachment' in menu and len(menu['attachment'])==1 and 'buttons' in menu['attachment'][0] and menu['attachment'][0]['buttons']:
+					curl	= {
+						"setting_type"		: "call_to_actions",
+						"thread_state"		: "existing_thread",
+						"call_to_actions"	: self._generate_facebook_buttons(menu['attachment'][0]['buttons'],False,False)
+					}
+					data	= requests.post("https://graph.facebook.com/v2.6/me/thread_settings?access_token=" + self.get_value('access_token'), headers={'Content-type': 'application/json', 'Accept': 'text/plain'}, data=json.dumps(curl), timeout=self.get_value('timeout'))
+					return data.json()
+				else:
+					raise ValueError('No attachment with buttons found.')
+					return {}
+			else:
+				curl	= {
+					"setting_type"		: "call_to_actions",
+					"thread_state"		: "existing_thread"
+				}
+				data	= requests.delete("https://graph.facebook.com/v2.6/me/thread_settings?access_token=" + self.get_value('access_token'), headers={'Content-type': 'application/json', 'Accept': 'text/plain'}, data=json.dumps(curl), timeout=self.get_value('timeout'))
+				return data.json()
+		return {}
 
 def deep_dict_merge(d, u):
 	''' VIA http://stackoverflow.com/questions/3232943/update-value-of-a-nested-dictionary-of-varying-depth '''
