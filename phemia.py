@@ -529,6 +529,99 @@ class Messaging:
 				return data.json()
 		return {}
 
+
+class Session:
+
+	ALLOWED_PLATFORMS	= ('raw')
+	
+	##### CONSTRUCTOR #####
+	def __init__(self,options={}):
+		default_settings	= {
+			"platform"	: "raw",				# save session as text files by default
+			
+			"raw"		: {						# saving sessions as text files containing JSON objects
+				"path"				: '',		# server to send messages to (if given)
+				"extension"			: 'txt'		# file extension
+			}
+		}
+		self.settings		= deep_dict_merge(default_settings,options)
+	
+	def is_platform(self,compare):
+		if compare:
+			return compare==self.settings['platform']
+		return False
+		
+	def set_platform(self,new_platform):
+		if new_platform and new_platform in self.ALLOWED_PLATFORMS:
+			self.settings['platform']	= new_platform
+		else:
+			raise ValueError('Platform "%s" is not supported.' % (new_platform))
+	
+	def get_value(self,variable):
+		return self.settings[self.settings['platform']][variable]
+			
+	def file_command(self,command,id,value=None):
+		if self.get_value('extension'):
+			if self.get_value('extension')[0]=='.':
+				id	+= self.get_value('extension')
+			else:
+				id	+= '.'+self.get_value('extension')
+		file	= os.path.join(self.get_value('path'), id)	
+		if command=='remove':
+			os.remove(file)
+		else:
+			if command=='get':
+				if not os.path.isfile(file):
+					data	= open(file, 'a').close()
+					return {}
+				else:
+					data	= open(file, 'r').read()
+					return json.loads(data)
+			else:
+				data	= open(file, 'w')
+				if command=='set':
+					data.write(json.dumps(value))
+					data.close()
+				elif command=='clear':
+					data.write('{}')
+					data.close()
+		return {}
+
+	def file_as_dict(self,id,key,value=None):
+		data	= self.file_command('get',id)
+		if value is not None:
+			data[key]	= value
+			new_data	= self.file_command('set',id,data)
+		if key in data:
+			return data[key]
+		return None
+
+	
+	def get(self,id,key):
+		if self.is_platform('raw'):
+			return self.file_as_dict(id,key)
+	
+	def set(self,id,key,value):
+		if self.is_platform('raw'):
+			return self.file_as_dict(id,key,value)
+	
+	def clear(self,id):
+		if self.is_platform('raw'):
+			return self.file_command('clear',id)
+		
+	def remove(self,key):
+		if self.is_platform('raw'):
+			return self.file_command('remove',id)
+	
+	def dict_path(self,data={},path=[]):
+		if data and path:
+			if path[0] in data:
+				if isinstance(data[path[0]], dict):
+					return self.dict_path(data[path[0]],path[1:])
+				elif len(path)==1:
+					return data[path[0]]
+		return None
+	
 def deep_dict_merge(d, u):
 	''' VIA http://stackoverflow.com/questions/3232943/update-value-of-a-nested-dictionary-of-varying-depth '''
 	for k, v in u.items():
@@ -539,6 +632,7 @@ def deep_dict_merge(d, u):
 			d[k] = u[k]
 	return d	
 
+	
 def get_attachment_type(file):
 	if file:
 		extension	= file.lower().split(".")[-1]
