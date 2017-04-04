@@ -535,6 +535,12 @@ class Messaging:
 				return data.json()
 		return {}
 
+	def get_user_info(self,user={}):
+		if self.is_platform('facebook'):
+			if user and 'id' in user:
+				data	= requests.get("https://graph.facebook.com/v2.6/"+str(user['id'])+"?fields=first_name,last_name,profile_pic,locale,timezone,gender&access_token=" + self.get_value('access_token'), headers={'Content-type': 'application/json', 'Accept': 'text/plain'}, timeout=self.get_value('timeout'))
+				return data.json()
+		return {}
 
 class Session:
 
