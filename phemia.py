@@ -122,7 +122,11 @@ class Messaging:
 							other['mids']		= data['entry'][0]['messaging'][0]['delivery']['watermark']
 					if 'read' in data['entry'][0]['messaging'][0] and 'watermark' in data['entry'][0]['messaging'][0]['read']:
 						other['read']		= data['entry'][0]['messaging'][0]['read']['watermark']
-
+					
+					if 'postback' in data['entry'][0]['messaging'][0]:
+						text 				= data['entry'][0]['messaging'][0]['postback']['payload']
+						other['is_postback']= True
+					
 					if 'message' in data['entry'][0]['messaging'][0]:
 						if 'text' in data['entry'][0]['messaging'][0]['message']:
 							text 				= data['entry'][0]['messaging'][0]['message']['text']
