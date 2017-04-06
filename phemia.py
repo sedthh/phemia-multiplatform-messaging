@@ -292,6 +292,7 @@ class Messaging:
 				if 'action' in message['other']:
 					if not response['message']:	# facebook won't send actions with attachments or text
 						response['sender_action']			= message['other']['action']
+						response['message']					= None
 				# documented on facebook but does not work
 				if 'notification' in message['other']:
 					response['notification_type']		= message['other']['notification']
@@ -550,13 +551,13 @@ class Messaging:
 				return data.json()
 		return {}
 
-	def welcome(self,payload):
+	def welcome(self,payload=None):
 		if self.is_platform('facebook'):
 			curl	= {
 				"setting_type"		: "call_to_actions",
 				"thread_state"		: "new_thread"
 			}
-			if payload:
+			if payload is not None:
 				curl['call_to_actions']	= [{"payload":payload}]
 				data	= requests.post("https://graph.facebook.com/v2.6/me/thread_settings?access_token=" + self.get_value('access_token'), headers={'Content-type': 'application/json', 'Accept': 'text/plain'}, data=json.dumps(curl), timeout=self.get_value('timeout'))
 			else:
