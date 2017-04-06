@@ -280,7 +280,7 @@ class Messaging:
 				# send text with buttons
 				elif len(message['attachment'])==1 and ('url' not in message['attachment'][0] or not message['attachment'][0]['url']) and ('type' not in message['attachment'][0] or message['attachment'][0]['type']=='none'):
 					if 'buttons' in message['attachment'][0]:
-						response['message']['quick_replies']= self._generate_facebook_buttons(message['attachment'][0]['buttons'], True)					
+						response['message']['quick_replies']= self._generate_facebook_buttons(message['attachment'][0]['buttons'], 'quick_reply')					
 				
 			# other
 			if 'other' in message:
@@ -443,12 +443,12 @@ class Messaging:
 			return "{0.scheme}://{0.netloc}/".format(urllib.parse.urlsplit(url))
 		return ''
 		
-	def _generate_facebook_buttons(self,buttons,quick_reply=False,auto_fallback=True):
+	def _generate_facebook_buttons(self,buttons,type='attachment'):
 		if buttons:
 			facebook_buttons	= []
 			for button in buttons:
 				tmp					= {}
-				if quick_reply:
+				if type=='quick_reply':
 					if 'type' in button and button['type'] == 'location':
 						tmp['content_type']	= 'location'
 					else:
@@ -463,7 +463,7 @@ class Messaging:
 							tmp['payload']		= tmp['title']
 						if 'image' in button:
 							tmp['image_url']	= button['image']
-				else:
+				elif type=='menu':
 					if 'text' in button:
 						tmp['title']		= button['text']
 					else:
@@ -471,8 +471,19 @@ class Messaging:
 					if 'type' in button and button['type'] == 'url' and 'value' in button:
 						tmp['type']			= 'web_url'
 						tmp['url']			= button['value']
-						if auto_fallback:
-							tmp['fallback_url']	= button['value']
+					else:
+						tmp['type']			= 'postback'
+						tmp['payload']		= button['value']
+					
+				else: 
+					if 'text' in button:
+						tmp['title']		= button['text']
+					else:
+						tmp['title']		= self.DEFAULT_BUTTON
+					if 'type' in button and button['type'] == 'url' and 'value' in button:
+						tmp['type']			= 'web_url'
+						tmp['url']			= button['value']
+						#tmp['fallback_url']	= button['value']
 					else:
 						tmp['type']			= 'postback'
 						if 'value' in button:
@@ -519,7 +530,7 @@ class Messaging:
 					curl	= {
 						"setting_type"		: "call_to_actions",
 						"thread_state"		: "existing_thread",
-						"call_to_actions"	: self._generate_facebook_buttons(menu['attachment'][0]['buttons'],False,False)
+						"call_to_actions"	: self._generate_facebook_buttons(menu['attachment'][0]['buttons'],'menu')
 					}
 					data	= requests.post("https://graph.facebook.com/v2.6/me/thread_settings?access_token=" + self.get_value('access_token'), headers={'Content-type': 'application/json', 'Accept': 'text/plain'}, data=json.dumps(curl), timeout=self.get_value('timeout'))
 					return data.json()
@@ -535,6 +546,20 @@ class Messaging:
 				return data.json()
 		return {}
 
+	def welcome(self,payload):
+		if self.is_platform('facebook'):
+			curl	= {
+				"setting_type"		: "call_to_actions",
+				"thread_state"		: "new_thread"
+			}
+			if payload:
+				curl['call_to_actions']	= [{"payload":payload}]
+				data	= requests.post("https://graph.facebook.com/v2.6/me/thread_settings?access_token=" + self.get_value('access_token'), headers={'Content-type': 'application/json', 'Accept': 'text/plain'}, data=json.dumps(curl), timeout=self.get_value('timeout'))
+			else:
+				data	= requests.delete("https://graph.facebook.com/v2.6/me/thread_settings?access_token=" + self.get_value('access_token'), headers={'Content-type': 'application/json', 'Accept': 'text/plain'}, data=json.dumps(curl), timeout=self.get_value('timeout'))
+			return data.json()
+		return {}
+		
 	def get_user_info(self,user={}):
 		if self.is_platform('facebook'):
 			if user and 'id' in user:
@@ -641,7 +666,7 @@ class Session:
 					new_data	= self.file_command('set',id,data)
 			else:
 				raise ValueError('Array length must be more than 0')
-			return data
+			return data[key]
 	
 	def dict_path(self,data={},path=[]):
 		if data and path:
