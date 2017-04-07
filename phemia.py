@@ -229,8 +229,13 @@ class Messaging:
 				if len(message['attachment'])==1 and 'url' in message['attachment'][0] and message['attachment'][0]['url']:
 					if 'type' not in message['attachment'][0] or message['attachment'][0]['type'] not in self.ALLOWED_ATTACHMENTS:
 						message['attachment'][0]['type']	= get_attachment_type(message['attachment'][0]['url'])
-					if 'reusable' not in message['attachment'][0]:
-						message['attachment'][0]['reusable']= False
+					if 'cache' in message['attachment'][0] and message['attachment'][0]['cache']:
+						if message['attachment'][0]['cache']>int(time.time()):
+							reusable	= True
+						else:
+							reusable	= False
+					else:
+						reusable	= False
 					
 					if 'text' in message and message['text']:
 						if 'title' not in message['attachment'][0]:
@@ -246,7 +251,7 @@ class Messaging:
 							"type"		: message['attachment'][0]['type'],
 							"payload"	: {
 								"url"		: message['attachment'][0]['url'],
-								"is_reusable":message['attachment'][0]['reusable']
+								"is_reusable":reusable
 							}
 						}
 					# send ONE image WITH text and/or buttons	
