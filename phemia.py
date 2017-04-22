@@ -517,7 +517,7 @@ class Messaging:
 		if self.is_platform('facebook'):
 			if action=="get":
 				data	= requests.get("https://graph.facebook.com/v2.6/me/thread_settings?fields=whitelisted_domains&access_token=" + self.get_value('access_token'), headers={'Content-type': 'application/json', 'Accept': 'text/plain'}, timeout=self.get_value('timeout'))
-			elif action in ('set','add','remove'):
+			elif action in ('add','remove','set'):
 				if not domains:
 					#domains	= ['https://'+os.environ.get('HTTP_HOST')+'/']
 					raise ValueError('No list of domains is given.')
@@ -622,11 +622,18 @@ class Session:
 					return {}
 				else:
 					data	= open(file, 'r').read()
-					return json.loads(data)
+					if data:
+						return json.loads(data)
+					else:
+						return {}
+						
 			else:
 				data	= open(file, 'w')
 				if command=='set':
-					data.write(json.dumps(new_contents))
+					if new_contents:
+						data.write(json.dumps(new_contents))
+					else:
+						data.write('{}')
 					data.close()
 				elif command=='clear':
 					data.write('{}')
